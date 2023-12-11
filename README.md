@@ -2,6 +2,13 @@
 
 This repo contains configurations, scripts, patches, etc. used for a proof of concept to replace static infrastructure credentials with open id tokens issued by Gardener.
 
+## Garden Landscape
+
+The development setup uses [local gardener with extensions](https://github.com/gardener/gardener/blob/master/docs/deployment/getting_started_locally_with_extensions.md) setup. To make the local kind cluster an identity token provider, the service account issuer must be changed to the hostname that will be used to publish the OIDC discovery documents later. For this purpose, checkout [vpnachev/gardener@projected-token-poc](https://github.com/vpnachev/gardener/tree/projected-token-poc) and run
+
+```bash
+$ make kind-extensions-up SERVICE_ACCOUNT_ISSUER=<hostname>
+```
 
 ## OIDC Discovery Charts
 
