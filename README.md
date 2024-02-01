@@ -33,12 +33,12 @@ $ helm --kubeconfig ${seed_kubeconfig} upgrade \
     --namespace oidc-discovery \
     --set oidc.config="${OIDC_CONFIG}" \
     --set oidc.keys="${OIDC_JWKS}" \
-    --set ingress.hostname="example.com"
+    --set ingress.hostname=<hostname>
 ```
 
 ## GCP Provider
 
-### Infrastructure setup
+### Infrastructure setup (GCP)
 
 Now, the local `kind-extensions` cluster has to be configured as Workload
 Identity Provider in GCP. The following configurations are required.
@@ -93,7 +93,7 @@ tokens, thus customized versions needs to be used.
         WEBHOOK_CONFIG_MODE=service
     ```
 
-### Shoot setup
+### Shoot setup (GCP)
 
 The Secret behind the SecretBinding still needs to set a serviceaccount.json and
 this is the file downloaded from the previous step. For the purpose of the PoC,
@@ -117,11 +117,95 @@ it will be also the bearer of the identity token which is set manually.
       namespace: garden-local
     provider:
       type: gcp
-        # The type of your provider, e.g. <aws|az|gcp|alicloud|...>
     secretRef:
       name: projected-token
       namespace: garden-local
-        # The name of the project prefixed with `garden-`, e.g. garden-<project-name>
     ```
 
 1. Create your GCP shoot using the `projected-token` SecretBinding
+
+
+## AWS Provider
+
+For AWS PoC a newer version of Gardener was used, so you might want to checkout
+[vpnachev/gardener@poc/managed-identity-aws](https://github.com/vpnachev/gardener/tree/poc/managed-identity-aws)
+before to spin up the local garden cluster, but the older one also es expected
+to work, however it is not tested.
+
+### Infrastructure setup (AWS)
+
+1. Create OIDC Identity Provider in the IAM service
+1. Create a Web Identity Role in the IAM service for the identity provider from
+   the previous step, do not assign yet any permissions.
+1. Configure the trust policy to require the `sub` claim to have specific value,
+   e.g. `"<hostname>:sub": "system:serviceaccount:garden-local:local-poc"`
+1. Create in-line permission policy for the Role, the required permissions are
+   documented at
+   <https://github.com/gardener/gardener-extension-provider-aws/blob/master/docs/usage/usage.md#permissions>
+
+### Provider AWS setup
+
+`gardener-extension-provider-aws` does not support out of the box projected
+tokens, thus customized versions needs to be used.
+
+1. Check out
+   <https://github.com/vpnachev/gardener-extension-provider-aws/tree/poc/managed-identity-aws>
+1. Scale down the `provider-aws` controllerdeployment to 0 replicas
+1. Set the `KUBECONFIG` environment variable to your seed cluster and
+   `GARDEN_KUBECONFIG` to your garden cluster.
+1. Hook your local computer to the seed cluster with
+
+    ```bash
+    make hook-me
+    ```
+
+1. Run the provider-aws controller in a container
+
+    ```bash
+    docker run -it --rm -p 8443:8443 \
+        --workdir=/go/src/github.com/gardener/gardener-extension-provider-aws \
+        -v $PWD:/go/src/github.com/gardener/gardener-extension-provider-aws \
+        -v $KUBECONFIG:/tmp/seed.kubeconfig \
+        -e KUBECONFIG=/tmp/seed.kubeconfig \
+        -v $GARDEN_KUBECONFIG:/tmp/garden.kubeconfig \
+        -e  GARDEN_KUBECONFIG=/tmp/garden.kubeconfig \
+        -e GARDENER_SHOOT_CLIENT=external \
+        golang:1.21
+
+    make start \
+        IGNORE_OPERATION_ANNOTATION=false \
+        LEADER_ELECTION=true \
+        EXTENSION_NAMESPACE=<extension-provider-gcp namespace name> \
+        WEBHOOK_CONFIG_MODE=service \
+        GARDENER_SHOOT_CLIENT=external
+    ```
+
+
+### Shoot setup (AWS)
+
+The infrastructure secret needs to set a OIDC token and the amazon resource name (ARN) of the Role.
+
+1. Create a secret with AWS credentials
+
+    ```bash
+    kubectl create secret generic projected-token-aws \
+        --from-literal=arn='arn:aws:iam::<account-id>:role/<role-name>' \
+        --from-literal=token=$(kubectl -n garden-local create token local-poc --audience <aud> --duration 87600s)
+    ```
+
+1. Create a SecretBinding
+
+    ```yaml
+    apiVersion: core.gardener.cloud/v1beta1
+    kind: SecretBinding
+    metadata:
+      name: projected-token-aws
+      namespace: garden-local
+    provider:
+      type: aws
+    secretRef:
+      name: projected-token-aws
+      namespace: garden-local
+    ```
+
+1. Create your AWS shoot using the `projected-token-aws` SecretBinding
